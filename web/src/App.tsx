@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { apiGet, type HealthResponse } from './api.js';
 import BookForm from './components/client/BookForm.js';
 import UsageForm from './components/client/UsageForm.js';
+import PlanChangeForm from './components/client/PlanChangeForm.js';
 
 type Role = 'client' | 'admin';
 
@@ -73,7 +74,7 @@ export default function App() {
   );
 }
 
-const CLIENT_TABS = ['Book & Subscribe', 'Report Usage'] as const;
+const CLIENT_TABS = ['Book & Subscribe', 'Report Usage', 'Plan Change'] as const;
 type ClientTab = (typeof CLIENT_TABS)[number];
 
 function ClientShell() {
@@ -100,6 +101,7 @@ function ClientShell() {
       </div>
       {tab === 'Book & Subscribe' && <BookForm onBooked={handleBooked} />}
       {tab === 'Report Usage' && <UsageForm prefilledTxnId={lastTxnId} />}
+      {tab === 'Plan Change' && <PlanChangeForm prefilledTxnId={lastTxnId} />}
     </div>
   );
 }

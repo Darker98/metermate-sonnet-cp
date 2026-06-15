@@ -75,6 +75,26 @@ export interface Component {
   unitPrice?: string;
 }
 
+export interface PlanChangePreview {
+  fromPlanHandle: string;
+  fromPlanName: string;
+  toPlanHandle: string;
+  toPlanName: string;
+  proratedAdjustmentInCents: number;
+  chargeInCents: number;
+  paymentDueInCents: number;
+  creditAppliedInCents: number;
+  paymentDueDisplay: string;
+}
+
+export interface PlanChangeResult extends MutatingResponse {
+  subscriptionState: string;
+  fromPlanName: string;
+  toPlanName: string;
+  timing: string;
+  paymentDueInCents: number;
+}
+
 export interface UsageResult extends MutatingResponse {
   usageId: number;
   quantity: number;
