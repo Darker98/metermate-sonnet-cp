@@ -2,11 +2,15 @@ import {
   ProductFamiliesController,
   ComponentsController,
   SubscriptionsController,
+  SubscriptionComponentsController,
   ApiError,
   CollectionMethod as MaxioCollectionMethod,
   ErrorListResponseError,
 } from '@maxio-com/advanced-billing-sdk';
-import type { CreateSubscriptionRequest } from '@maxio-com/advanced-billing-sdk';
+import type {
+  CreateSubscriptionRequest,
+  CreateUsageRequest,
+} from '@maxio-com/advanced-billing-sdk';
 import { maxioClient } from '../maxioClient.js';
 import { config } from '../config.js';
 import type { ProductInfo, ComponentInfo } from '../types.js';
@@ -14,6 +18,7 @@ import type { ProductInfo, ComponentInfo } from '../types.js';
 export const productFamiliesCtrl = new ProductFamiliesController(maxioClient);
 export const componentsCtrl = new ComponentsController(maxioClient);
 export const subscriptionsCtrl = new SubscriptionsController(maxioClient);
+export const subscriptionComponentsCtrl = new SubscriptionComponentsController(maxioClient);
 
 export const productCache = new Map<string, ProductInfo>();
 export const componentCache = new Map<string, ComponentInfo>();
@@ -143,6 +148,59 @@ export async function createSubscription(params: CreateSubscriptionParams): Prom
     }
     if (err instanceof ApiError) {
       throw new Error(`[maxio] createSubscription failed (HTTP ${err.statusCode}): ${String(err.body)}`);
+    }
+    throw err;
+  }
+}
+
+export interface ReportUsageParams {
+  subscriptionId: number;
+  componentId: number;
+  quantity: number;
+  memo?: string;
+}
+
+export interface UsageResult {
+  usageId: number;
+  quantity: number;
+  componentId: number;
+  componentHandle?: string;
+}
+
+export async function reportUsage(params: ReportUsageParams): Promise<UsageResult> {
+  const body: CreateUsageRequest = {
+    usage: {
+      quantity: params.quantity,
+      ...(params.memo ? { memo: params.memo } : {}),
+    },
+  };
+
+  try {
+    const response = await subscriptionComponentsCtrl.createUsage(
+      params.subscriptionId,
+      params.componentId,
+      body
+    );
+
+    const usage = response.result?.usage;
+    if (!usage?.id) {
+      throw new Error('[maxio] createUsage returned no usage object');
+    }
+
+    return {
+      usageId: Number(usage.id),
+      quantity: typeof usage.quantity === 'number' ? usage.quantity : params.quantity,
+      componentId: usage.componentId !== undefined ? Number(usage.componentId) : params.componentId,
+      componentHandle: usage.componentHandle ?? undefined,
+    };
+  } catch (err) {
+    if (err instanceof ErrorListResponseError) {
+      const messages =
+        (err.result as { errors?: string[] } | undefined)?.errors ?? [];
+      throw new Error(`[maxio] Usage validation failed: ${messages.join('; ')}`);
+    }
+    if (err instanceof ApiError) {
+      throw new Error(`[maxio] createUsage failed (HTTP ${err.statusCode}): ${String(err.body)}`);
     }
     throw err;
   }

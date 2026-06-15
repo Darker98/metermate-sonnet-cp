@@ -220,6 +220,44 @@ export interface BookingMessageOpts {
   subscriptionId: number;
 }
 
+export interface UsageMessageOpts {
+  channelId: string;
+  componentName: string;
+  unitName: string;
+  quantity: number;
+  memo?: string;
+  txnId: string;
+  usageId: number;
+}
+
+export async function postUsageMessage(opts: UsageMessageOpts): Promise<void> {
+  const blocks = [
+    {
+      type: 'header',
+      text: { type: 'plain_text', text: 'Usage Reported' },
+    },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*Component:*\n${opts.componentName}` },
+        { type: 'mrkdwn', text: `*Quantity:*\n${opts.quantity} ${opts.unitName}` },
+        { type: 'mrkdwn', text: `*Memo:*\n${opts.memo ?? '(none)'}` },
+        { type: 'mrkdwn', text: `*Usage ID:*\n${opts.usageId}` },
+      ],
+    },
+    {
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `Transaction: \`${opts.txnId}\`` }],
+    },
+  ];
+
+  await postMessage({
+    channelId: opts.channelId,
+    text: `Usage reported: ${opts.quantity} ${opts.unitName} of ${opts.componentName}`,
+    blocks,
+  });
+}
+
 export async function postBookingMessage(opts: BookingMessageOpts): Promise<void> {
   const blocks = [
     {
