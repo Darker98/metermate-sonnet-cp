@@ -4,6 +4,7 @@ import BookForm from './components/client/BookForm.js';
 import UsageForm from './components/client/UsageForm.js';
 import PlanChangeForm from './components/client/PlanChangeForm.js';
 import LifecycleForm from './components/client/LifecycleForm.js';
+import InvoiceForm from './components/admin/InvoiceForm.js';
 
 type Role = 'client' | 'admin';
 
@@ -143,23 +144,40 @@ function AdminLogin({ onLogin }: AdminLoginProps) {
   );
 }
 
+const ADMIN_TABS = ['Issue Invoice'] as const;
+type AdminTab = (typeof ADMIN_TABS)[number];
+
 interface AdminShellProps {
   creds: AdminCreds;
   onLogout: () => void;
 }
 
-function AdminShell({ onLogout }: AdminShellProps) {
+function AdminShell({ creds, onLogout }: AdminShellProps) {
+  const [tab, setTab] = useState<AdminTab>('Issue Invoice');
+
   return (
-    <div className="card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2>Admin Panel</h2>
-        <button className="btn btn-secondary" style={{ padding: '5px 14px', fontSize: 13 }} onClick={onLogout}>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div className="tabs" style={{ marginBottom: 0 }}>
+          {ADMIN_TABS.map((t) => (
+            <button
+              key={t}
+              className={`tab${tab === t ? ' active' : ''}`}
+              onClick={() => setTab(t)}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+        <button
+          className="btn btn-secondary"
+          style={{ padding: '5px 14px', fontSize: 13, whiteSpace: 'nowrap' }}
+          onClick={onLogout}
+        >
           Log out
         </button>
       </div>
-      <p style={{ color: '#64748b', fontSize: 14 }}>
-        Admin use case forms will appear here as they are implemented.
-      </p>
+      {tab === 'Issue Invoice' && <InvoiceForm creds={creds} />}
     </div>
   );
 }
