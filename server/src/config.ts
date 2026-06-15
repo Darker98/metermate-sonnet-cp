@@ -39,7 +39,7 @@ export const config = {
 
   consultants: [
     {
-      id: 'alice',
+      id: 'zaid',
       name: env('CONSULTANT_1_NAME', 'Alice Chen'),
       email: env('CONSULTANT_1_EMAIL', ''),
     },

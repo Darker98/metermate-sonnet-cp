@@ -1,79 +1,73 @@
-import {
-  AuthApi,
-  ChatApi,
-  ChatPostMessageErrorSchemaError,
-  Client,
-  ConversationsApi,
-  ConversationsCreateErrorSchemaError,
-  ConversationsInviteErrorSchema1Error,
-  Environment,
-  UsersApi,
-  ApiError,
-  OauthScope,
-} from 'slack-apimatic-sdk';
 import { config } from '../config.js';
 import { transactionStore } from '../stores/transactionStore.js';
 
-const slackClient = new Client({
-  authorizationCodeAuthCredentials: {
-    oauthClientId: config.slack.oauthClientId,
-    oauthClientSecret: config.slack.oauthClientSecret,
-    oauthRedirectUri: config.slack.oauthRedirectUri,
-    oauthScopes: [
-      OauthScope.Channelswrite,
-      OauthScope.Groupswrite,
-      OauthScope.Imwrite,
-      OauthScope.Mpimwrite,
-      OauthScope.UsersreadEmail,
-      OauthScope.Chatwritebot,
-      OauthScope.Chatwriteuser,
-    ],
-    oauthToken: {
-      accessToken: config.slack.botToken,
-      tokenType: 'bearer',
+const SLACK_API = 'https://slack.com/api';
+
+interface SlackResponse {
+  ok: boolean;
+  error?: string;
+}
+
+async function slackPost<T extends SlackResponse>(
+  method: string,
+  body: Record<string, unknown> = {}
+): Promise<T> {
+  const res = await fetch(`${SLACK_API}/${method}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.slack.botToken}`,
+      'Content-Type': 'application/json; charset=utf-8',
     },
-  },
-  timeout: 30000,
-  environment: Environment.Production,
-});
+    body: JSON.stringify(body),
+  });
 
-const authApi = new AuthApi(slackClient);
-const conversationsApi = new ConversationsApi(slackClient);
-const usersApi = new UsersApi(slackClient);
-const chatApi = new ChatApi(slackClient);
-
-// The SDK defines ok as string but Slack actually returns boolean.
-// When that mismatch triggers a ResponseValidationError on an HTTP 200,
-// parse the raw body directly rather than failing the call.
-async function slackCall<T>(fn: () => Promise<unknown>): Promise<T | null> {
-  try {
-    const res = (await fn()) as { result?: T };
-    return res.result ?? null;
-  } catch (err) {
-    const e = err as { statusCode?: number; body?: string };
-    if (e.statusCode === 200 && typeof e.body === 'string') {
-      try {
-        return JSON.parse(e.body) as T;
-      } catch {
-        // body not parseable — fall through to rethrow
-      }
-    }
-    throw err;
+  if (!res.ok) {
+    throw new Error(`[slack] ${method} HTTP ${res.status} ${res.statusText}`);
   }
+
+  const data = (await res.json()) as T;
+
+  if (!data.ok) {
+    throw new Error(`[slack] ${method} failed: ${data.error ?? 'unknown_error'}`);
+  }
+
+  return data;
+}
+
+async function slackGet<T extends SlackResponse>(
+  method: string,
+  params: Record<string, string>
+): Promise<T> {
+  const url = new URL(`${SLACK_API}/${method}`);
+  for (const [k, v] of Object.entries(params)) {
+    url.searchParams.set(k, v);
+  }
+
+  const res = await fetch(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${config.slack.botToken}`,
+    },
+  });
+
+  if (!res.ok) {
+    throw new Error(`[slack] ${method} HTTP ${res.status} ${res.statusText}`);
+  }
+
+  const data = (await res.json()) as T;
+
+  if (!data.ok) {
+    throw new Error(`[slack] ${method} failed: ${data.error ?? 'unknown_error'}`);
+  }
+
+  return data;
 }
 
 export async function checkSlackHealth(): Promise<boolean> {
   try {
-    const result = await slackCall<{ ok?: unknown }>(() =>
-      authApi.authTest(config.slack.botToken)
-    );
-    return !!result?.ok;
+    await slackPost<SlackResponse>('auth.test');
+    return true;
   } catch (err) {
-    if (err instanceof ApiError) {
-      console.error('[slack] authTest ApiError', err.statusCode, err.body);
-    } else {
-      console.error('[slack] authTest error:', err instanceof Error ? err.message : err);
-    }
+    console.error('[slack] health check failed:', err instanceof Error ? err.message : err);
     return false;
   }
 }
@@ -90,11 +84,11 @@ function sanitizeChannelName(raw: string): string {
 async function resolveUserId(email: string): Promise<string | null> {
   if (!email) return null;
   try {
-    const result = await slackCall<{ ok?: unknown; user?: { id?: string } }>(() =>
-      usersApi.usersLookupByEmail(config.slack.botToken, email)
+    const data = await slackGet<SlackResponse & { user?: { id?: string } }>(
+      'users.lookupByEmail',
+      { email }
     );
-    if (result?.ok && result.user?.id) return result.user.id;
-    return null;
+    return data.user?.id ?? null;
   } catch {
     return null;
   }
@@ -102,38 +96,29 @@ async function resolveUserId(email: string): Promise<string | null> {
 
 async function createPrivateChannel(name: string): Promise<{ id: string; name: string } | null> {
   try {
-    const result = await slackCall<{ ok?: unknown; channel?: { id?: string; name?: string } }>(() =>
-      conversationsApi.conversationsCreate(config.slack.botToken, name, true)
+    const data = await slackPost<SlackResponse & { channel?: { id?: string; name?: string } }>(
+      'conversations.create',
+      { name, is_private: true }
     );
-    if (result?.ok && result.channel?.id && result.channel?.name) {
-      return { id: result.channel.id, name: result.channel.name };
-    }
+    const ch = data.channel;
+    if (ch?.id && ch.name) return { id: ch.id, name: ch.name };
     return null;
-  } catch (error) {
-    if (error instanceof ConversationsCreateErrorSchemaError) {
-      const body = error.result as { error?: string } | undefined;
-      if (body?.error === 'name_taken') return null;
-    }
-    throw error;
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('name_taken')) return null;
+    throw err;
   }
 }
 
 async function inviteUsers(channelId: string, userIds: string[]): Promise<void> {
   if (userIds.length === 0) return;
   try {
-    await slackCall(() =>
-      conversationsApi.conversationsInvite(config.slack.botToken, channelId, userIds.join(','))
-    );
-  } catch (error) {
-    if (error instanceof ConversationsInviteErrorSchema1Error) {
-      const body = error.result as { error?: string } | undefined;
-      if (body?.error === 'already_in_channel') return;
-    }
-    if (error instanceof ApiError) {
-      console.error(`[slack] invite failed for channel ${channelId}:`, error.statusCode, error.body);
-      return;
-    }
-    throw error;
+    await slackPost('conversations.invite', {
+      channel: channelId,
+      users: userIds.join(','),
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('already_in_channel')) return;
+    console.error(`[slack] invite failed for channel ${channelId}:`, err instanceof Error ? err.message : err);
   }
 }
 
@@ -168,15 +153,13 @@ export async function ensureTxnChannel(opts: EnsureTxnChannelOpts): Promise<TxnC
   }
 
   const clientSlug = sanitizeChannelName(clientEmail.split('@')[0] ?? clientEmail);
-  const rawName = `txn-${consultantId}-${clientSlug}-${seq}`;
-  const channelName = sanitizeChannelName(rawName);
+  const channelName = sanitizeChannelName(`txn-${consultantId}-${clientSlug}-${seq}`);
 
   let channel = await createPrivateChannel(channelName);
 
   if (!channel) {
     const ts = String(Date.now()).slice(-6);
-    const fallbackName = sanitizeChannelName(`${channelName}-${ts}`).slice(0, 80);
-    channel = await createPrivateChannel(fallbackName);
+    channel = await createPrivateChannel(sanitizeChannelName(`${channelName}-${ts}`).slice(0, 80));
   }
 
   if (!channel) {
@@ -216,31 +199,53 @@ export interface PostMessageOpts {
 export async function postMessage(opts: PostMessageOpts): Promise<void> {
   const { channelId, text, blocks } = opts;
   try {
-    await slackCall(() =>
-      chatApi.chatPostMessage(
-        config.slack.botToken,
-        channelId,
-        undefined,              // asUser
-        undefined,              // attachments
-        blocks ? JSON.stringify(blocks) : undefined, // blocks
-        undefined,              // iconEmoji
-        undefined,              // iconUrl
-        undefined,              // linkNames
-        undefined,              // mrkdwn
-        undefined,              // parse
-        undefined,              // replyBroadcast
-        text                    // text
-      )
-    );
-  } catch (error) {
-    if (error instanceof ChatPostMessageErrorSchemaError) {
-      console.error('[slack] postMessage failed:', error.result);
-      return;
-    }
-    if (error instanceof ApiError) {
-      console.error('[slack] postMessage failed:', error.statusCode, error.body);
-      return;
-    }
-    throw error;
+    await slackPost('chat.postMessage', {
+      channel: channelId,
+      text,
+      ...(blocks ? { blocks } : {}),
+    });
+  } catch (err) {
+    console.error('[slack] postMessage failed:', err instanceof Error ? err.message : err);
   }
+}
+
+export interface BookingMessageOpts {
+  channelId: string;
+  consultantName: string;
+  clientEmail: string;
+  planName: string;
+  priceDisplay: string;
+  collectionMethod: string;
+  txnId: string;
+  subscriptionId: number;
+}
+
+export async function postBookingMessage(opts: BookingMessageOpts): Promise<void> {
+  const blocks = [
+    {
+      type: 'header',
+      text: { type: 'plain_text', text: 'New Subscription Booked' },
+    },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*Consultant:*\n${opts.consultantName}` },
+        { type: 'mrkdwn', text: `*Client:*\n${opts.clientEmail}` },
+        { type: 'mrkdwn', text: `*Plan:*\n${opts.planName}` },
+        { type: 'mrkdwn', text: `*Price:*\n${opts.priceDisplay}` },
+        { type: 'mrkdwn', text: `*Collection:*\n${opts.collectionMethod}` },
+        { type: 'mrkdwn', text: `*Maxio Subscription ID:*\n${opts.subscriptionId}` },
+      ],
+    },
+    {
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `Transaction: \`${opts.txnId}\`` }],
+    },
+  ];
+
+  await postMessage({
+    channelId: opts.channelId,
+    text: `New subscription booked for ${opts.clientEmail} — plan: ${opts.planName}`,
+    blocks,
+  });
 }

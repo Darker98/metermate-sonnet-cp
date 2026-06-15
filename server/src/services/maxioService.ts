@@ -1,14 +1,19 @@
 import {
   ProductFamiliesController,
   ComponentsController,
+  SubscriptionsController,
   ApiError,
+  CollectionMethod as MaxioCollectionMethod,
+  ErrorListResponseError,
 } from '@maxio-com/advanced-billing-sdk';
+import type { CreateSubscriptionRequest } from '@maxio-com/advanced-billing-sdk';
 import { maxioClient } from '../maxioClient.js';
 import { config } from '../config.js';
 import type { ProductInfo, ComponentInfo } from '../types.js';
 
 export const productFamiliesCtrl = new ProductFamiliesController(maxioClient);
 export const componentsCtrl = new ComponentsController(maxioClient);
+export const subscriptionsCtrl = new SubscriptionsController(maxioClient);
 
 export const productCache = new Map<string, ProductInfo>();
 export const componentCache = new Map<string, ComponentInfo>();
@@ -82,5 +87,63 @@ export async function checkMaxioHealth(): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+export interface CreateSubscriptionParams {
+  productHandle: string;
+  clientEmail: string;
+  clientFirstName: string;
+  clientLastName: string;
+  companyName?: string;
+  collectionMethod: 'automatic' | 'remittance';
+}
+
+export interface SubscriptionResult {
+  subscriptionId: number;
+  state: string;
+  customerId: number;
+}
+
+export async function createSubscription(params: CreateSubscriptionParams): Promise<SubscriptionResult> {
+  const body: CreateSubscriptionRequest = {
+    subscription: {
+      productHandle: params.productHandle,
+      paymentCollectionMethod:
+        params.collectionMethod === 'automatic'
+          ? MaxioCollectionMethod.Automatic
+          : MaxioCollectionMethod.Remittance,
+      customerAttributes: {
+        firstName: params.clientFirstName,
+        lastName: params.clientLastName,
+        email: params.clientEmail,
+        organization: params.companyName,
+      },
+    },
+  };
+
+  try {
+    const response = await subscriptionsCtrl.createSubscription(body);
+    const sub = response.result?.subscription;
+
+    if (!sub?.id || !sub.state || sub.customer?.id === undefined) {
+      throw new Error('[maxio] createSubscription returned incomplete subscription data');
+    }
+
+    return {
+      subscriptionId: sub.id,
+      state: String(sub.state),
+      customerId: sub.customer.id,
+    };
+  } catch (err) {
+    if (err instanceof ErrorListResponseError) {
+      const messages =
+        (err.result as { errors?: string[] } | undefined)?.errors ?? [];
+      throw new Error(`[maxio] Subscription validation failed: ${messages.join('; ')}`);
+    }
+    if (err instanceof ApiError) {
+      throw new Error(`[maxio] createSubscription failed (HTTP ${err.statusCode}): ${String(err.body)}`);
+    }
+    throw err;
   }
 }
