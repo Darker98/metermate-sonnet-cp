@@ -305,6 +305,55 @@ export async function postUsageMessage(opts: UsageMessageOpts): Promise<void> {
   });
 }
 
+export interface LifecycleMessageOpts {
+  channelId: string;
+  action: string;
+  cancelTiming?: string;
+  subscriptionState: string;
+  subscriptionId: number;
+  txnId: string;
+}
+
+const ACTION_PAST: Record<string, string> = {
+  pause: 'Paused',
+  resume: 'Resumed',
+  cancel: 'Cancelled',
+  reactivate: 'Reactivated',
+};
+
+export async function postLifecycleMessage(opts: LifecycleMessageOpts): Promise<void> {
+  const label = ACTION_PAST[opts.action] ?? opts.action;
+  const actionDetail =
+    opts.action === 'cancel' && opts.cancelTiming
+      ? `${label} (${opts.cancelTiming})`
+      : label;
+
+  const blocks = [
+    {
+      type: 'header',
+      text: { type: 'plain_text', text: `Subscription ${label}` },
+    },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*Action:*\n${actionDetail}` },
+        { type: 'mrkdwn', text: `*Subscription state:*\n${opts.subscriptionState}` },
+        { type: 'mrkdwn', text: `*Subscription ID:*\n${opts.subscriptionId}` },
+      ],
+    },
+    {
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `Transaction: \`${opts.txnId}\`` }],
+    },
+  ];
+
+  await postMessage({
+    channelId: opts.channelId,
+    text: `Subscription ${label.toLowerCase()} — state: ${opts.subscriptionState}`,
+    blocks,
+  });
+}
+
 export async function postBookingMessage(opts: BookingMessageOpts): Promise<void> {
   const blocks = [
     {

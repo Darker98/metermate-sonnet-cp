@@ -5,6 +5,7 @@ import { metaRouter } from './routes/meta.js';
 import { bookRouter } from './routes/book.js';
 import { usageRouter } from './routes/usage.js';
 import { planChangeRouter } from './routes/planChange.js';
+import { lifecycleRouter } from './routes/lifecycle.js';
 import { sessionStore } from './stores/sessionStore.js';
 import { loadProductCache, loadComponentCache, productCache } from './services/maxioService.js';
 
@@ -17,6 +18,7 @@ app.use('/api', metaRouter);
 app.use('/api', bookRouter);
 app.use('/api', usageRouter);
 app.use('/api', planChangeRouter);
+app.use('/api', lifecycleRouter);
 
 async function bootstrap(): Promise<void> {
   await Promise.all([loadProductCache(), loadComponentCache()]);

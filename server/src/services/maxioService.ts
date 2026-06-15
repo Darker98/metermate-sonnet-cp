@@ -4,6 +4,7 @@ import {
   SubscriptionsController,
   SubscriptionComponentsController,
   SubscriptionProductsController,
+  SubscriptionStatusController,
   ApiError,
   CollectionMethod as MaxioCollectionMethod,
   ErrorListResponseError,
@@ -13,6 +14,9 @@ import type {
   CreateUsageRequest,
   SubscriptionMigrationPreviewRequest,
   SubscriptionProductMigrationRequest,
+  CancellationRequest,
+  ReactivateSubscriptionRequest,
+  PauseRequest,
 } from '@maxio-com/advanced-billing-sdk';
 import { maxioClient } from '../maxioClient.js';
 import { config } from '../config.js';
@@ -23,6 +27,7 @@ export const componentsCtrl = new ComponentsController(maxioClient);
 export const subscriptionsCtrl = new SubscriptionsController(maxioClient);
 export const subscriptionComponentsCtrl = new SubscriptionComponentsController(maxioClient);
 export const subscriptionProductsCtrl = new SubscriptionProductsController(maxioClient);
+export const subscriptionStatusCtrl = new SubscriptionStatusController(maxioClient);
 
 export const productCache = new Map<string, ProductInfo>();
 export const componentCache = new Map<string, ComponentInfo>();
@@ -294,6 +299,78 @@ export interface ExecutePlanChangeResult {
   state: string;
   newProductName: string;
   newProductId: number;
+}
+
+export interface LifecycleParams {
+  subscriptionId: number;
+  action: 'pause' | 'resume' | 'cancel' | 'reactivate';
+  cancelTiming?: 'immediate' | 'end-of-period';
+}
+
+export interface LifecycleResult {
+  subscriptionId: number;
+  state: string;
+}
+
+export async function performLifecycleAction(params: LifecycleParams): Promise<LifecycleResult> {
+  const { subscriptionId, action, cancelTiming } = params;
+
+  try {
+    let state: string;
+
+    switch (action) {
+      case 'pause': {
+        const pauseBody: PauseRequest = {};
+        const response = await subscriptionStatusCtrl.pauseSubscription(subscriptionId, pauseBody);
+        const sub = response.result?.subscription;
+        if (!sub?.state) throw new Error('[maxio] pauseSubscription returned no subscription state');
+        state = String(sub.state);
+        break;
+      }
+      case 'resume': {
+        const response = await subscriptionStatusCtrl.resumeSubscription(subscriptionId);
+        const sub = response.result?.subscription;
+        if (!sub?.state) throw new Error('[maxio] resumeSubscription returned no subscription state');
+        state = String(sub.state);
+        break;
+      }
+      case 'cancel': {
+        const cancelBody: CancellationRequest = {
+          subscription: {
+            cancelAtEndOfPeriod: cancelTiming !== 'immediate',
+          },
+        };
+        const response = await subscriptionStatusCtrl.cancelSubscription(subscriptionId, cancelBody);
+        const sub = response.result?.subscription;
+        if (!sub?.state) throw new Error('[maxio] cancelSubscription returned no subscription state');
+        state = String(sub.state);
+        break;
+      }
+      case 'reactivate': {
+        const reactivateBody: ReactivateSubscriptionRequest = {};
+        const response = await subscriptionStatusCtrl.reactivateSubscription(subscriptionId, reactivateBody);
+        const sub = response.result?.subscription;
+        if (!sub?.state) throw new Error('[maxio] reactivateSubscription returned no subscription state');
+        state = String(sub.state);
+        break;
+      }
+      default: {
+        const _exhaustive: never = action;
+        throw new Error(`[maxio] Unknown lifecycle action: ${String(_exhaustive)}`);
+      }
+    }
+
+    return { subscriptionId, state };
+  } catch (err) {
+    if (err instanceof ErrorListResponseError) {
+      const messages = (err.result as { errors?: string[] } | undefined)?.errors ?? [];
+      throw new Error(`[maxio] Lifecycle '${action}' failed: ${messages.join('; ')}`);
+    }
+    if (err instanceof ApiError) {
+      throw new Error(`[maxio] Lifecycle '${action}' failed (HTTP ${err.statusCode}): ${String(err.body)}`);
+    }
+    throw err;
+  }
 }
 
 export async function executePlanChange(
