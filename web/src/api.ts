@@ -66,6 +66,23 @@ export interface MutatingResponse {
   [key: string]: unknown;
 }
 
+export interface Component {
+  id: number;
+  handle: string;
+  name: string;
+  unitName: string;
+  kind: string;
+  unitPrice?: string;
+}
+
+export interface UsageResult extends MutatingResponse {
+  usageId: number;
+  quantity: number;
+  componentHandle: string;
+  componentName: string;
+  subscriptionId: number;
+}
+
 export interface BookResult extends MutatingResponse {
   subscriptionId: number;
   subscriptionState: string;

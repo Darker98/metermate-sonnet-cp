@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { apiGet, apiPost } from '../../api.js';
 import type { Product, Consultant, BookResult } from '../../api.js';
+
+interface BookFormProps {
+  onBooked?: (txnId: string, channelName: string) => void;
+}
 import { getSessionId } from '../../session.js';
 
 interface FormState {
@@ -23,7 +27,7 @@ const EMPTY: FormState = {
   companyName: '',
 };
 
-export default function BookForm() {
+export default function BookForm({ onBooked }: BookFormProps) {
   const [consultants, setConsultants] = useState<Consultant[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loadError, setLoadError] = useState('');
@@ -72,6 +76,7 @@ export default function BookForm() {
       });
       setResult(res);
       setForm((f) => ({ ...EMPTY, consultantId: f.consultantId, planHandle: f.planHandle }));
+      if (res.txnId) onBooked?.(res.txnId, res.channelName ?? '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unexpected error');
     } finally {

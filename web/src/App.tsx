@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { apiGet, type HealthResponse } from './api.js';
 import BookForm from './components/client/BookForm.js';
+import UsageForm from './components/client/UsageForm.js';
 
 type Role = 'client' | 'admin';
 
@@ -72,8 +73,35 @@ export default function App() {
   );
 }
 
+const CLIENT_TABS = ['Book & Subscribe', 'Report Usage'] as const;
+type ClientTab = (typeof CLIENT_TABS)[number];
+
 function ClientShell() {
-  return <BookForm />;
+  const [tab, setTab] = useState<ClientTab>('Book & Subscribe');
+  const [lastTxnId, setLastTxnId] = useState('');
+
+  const handleBooked = (txnId: string) => {
+    setLastTxnId(txnId);
+    setTab('Report Usage');
+  };
+
+  return (
+    <div>
+      <div className="tabs">
+        {CLIENT_TABS.map((t) => (
+          <button
+            key={t}
+            className={`tab${tab === t ? ' active' : ''}`}
+            onClick={() => setTab(t)}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+      {tab === 'Book & Subscribe' && <BookForm onBooked={handleBooked} />}
+      {tab === 'Report Usage' && <UsageForm prefilledTxnId={lastTxnId} />}
+    </div>
+  );
 }
 
 interface AdminLoginProps {
