@@ -1,73 +1,83 @@
+import {
+  AuthApi,
+  ChatApi,
+  ChatPostMessageErrorSchemaError,
+  Client,
+  ConversationsApi,
+  ConversationsCreateErrorSchemaError,
+  ConversationsInviteErrorSchema1Error,
+  Environment,
+  UsersApi,
+  ApiError,
+  OauthScope,
+} from 'slack-apimatic-sdk';
 import { config } from '../config.js';
 import { transactionStore } from '../stores/transactionStore.js';
 
-const SLACK_API = 'https://slack.com/api';
-
-interface SlackResponse {
-  ok: boolean;
-  error?: string;
-}
-
-async function slackPost<T extends SlackResponse>(
-  method: string,
-  body: Record<string, unknown> = {}
-): Promise<T> {
-  const res = await fetch(`${SLACK_API}/${method}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${config.slack.botToken}`,
-      'Content-Type': 'application/json; charset=utf-8',
+const slackClient = new Client({
+  authorizationCodeAuthCredentials: {
+    oauthClientId: config.slack.oauthClientId,
+    oauthClientSecret: config.slack.oauthClientSecret,
+    oauthRedirectUri: config.slack.oauthRedirectUri,
+    oauthScopes: [
+      OauthScope.Channelswrite,
+      OauthScope.Groupswrite,
+      OauthScope.Imwrite,
+      OauthScope.Mpimwrite,
+      OauthScope.UsersreadEmail,
+      OauthScope.Chatwritebot,
+      OauthScope.Chatwriteuser,
+    ],
+    // Supply the bot token as the pre-obtained OAuth access token so the SDK
+    // uses it as the Bearer token without triggering an OAuth exchange flow.
+    oauthToken: {
+      accessToken: config.slack.botToken,
+      expiry: BigInt(Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 365), // arbitrary future expiry time since token is pre-obtained
+      expiresIn: BigInt(60 * 60 * 24 * 365),
+      tokenType: 'bearer',
     },
-    body: JSON.stringify(body),
-  });
+  },
+  timeout: 30000,
+  environment: Environment.Production,
+});
 
-  if (!res.ok) {
-    throw new Error(`[slack] ${method} HTTP ${res.status} ${res.statusText}`);
+const authApi = new AuthApi(slackClient);
+const conversationsApi = new ConversationsApi(slackClient);
+const usersApi = new UsersApi(slackClient);
+const chatApi = new ChatApi(slackClient);
+
+// The SDK defines ok as string but Slack actually returns boolean.
+// When that mismatch triggers a ResponseValidationError on an HTTP 200,
+// parse the raw body directly rather than failing the call.
+async function slackCall<T>(fn: () => Promise<unknown>): Promise<T | null> {
+  try {
+    const res = (await fn()) as { result?: T };
+    return res.result ?? null;
+  } catch (err) {
+    const e = err as { statusCode?: number; body?: string };
+    if (e.statusCode === 200 && typeof e.body === 'string') {
+      try {
+        return JSON.parse(e.body) as T;
+      } catch {
+        // body not parseable — fall through to rethrow
+      }
+    }
+    throw err;
   }
-
-  const data = (await res.json()) as T;
-
-  if (!data.ok) {
-    throw new Error(`[slack] ${method} failed: ${data.error ?? 'unknown_error'}`);
-  }
-
-  return data;
-}
-
-async function slackGet<T extends SlackResponse>(
-  method: string,
-  params: Record<string, string>
-): Promise<T> {
-  const url = new URL(`${SLACK_API}/${method}`);
-  for (const [k, v] of Object.entries(params)) {
-    url.searchParams.set(k, v);
-  }
-
-  const res = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${config.slack.botToken}`,
-    },
-  });
-
-  if (!res.ok) {
-    throw new Error(`[slack] ${method} HTTP ${res.status} ${res.statusText}`);
-  }
-
-  const data = (await res.json()) as T;
-
-  if (!data.ok) {
-    throw new Error(`[slack] ${method} failed: ${data.error ?? 'unknown_error'}`);
-  }
-
-  return data;
 }
 
 export async function checkSlackHealth(): Promise<boolean> {
   try {
-    await slackPost<SlackResponse>('auth.test');
-    return true;
+    const result = await slackCall<{ ok?: unknown }>(() =>
+      authApi.authTest(config.slack.botToken)
+    );
+    return !!result?.ok;
   } catch (err) {
-    console.error('[slack] health check failed:', err instanceof Error ? err.message : err);
+    if (err instanceof ApiError) {
+      console.error('[slack] authTest ApiError', err.statusCode, err.body);
+    } else {
+      console.error('[slack] authTest error:', err instanceof Error ? err.message : err);
+    }
     return false;
   }
 }
@@ -84,11 +94,11 @@ function sanitizeChannelName(raw: string): string {
 async function resolveUserId(email: string): Promise<string | null> {
   if (!email) return null;
   try {
-    const data = await slackGet<SlackResponse & { user?: { id?: string } }>(
-      'users.lookupByEmail',
-      { email }
+    const result = await slackCall<{ ok?: unknown; user?: { id?: string } }>(() =>
+      usersApi.usersLookupByEmail(config.slack.botToken, email)
     );
-    return data.user?.id ?? null;
+    if (result?.ok && result.user?.id) return result.user.id;
+    return null;
   } catch {
     return null;
   }
@@ -96,29 +106,38 @@ async function resolveUserId(email: string): Promise<string | null> {
 
 async function createPrivateChannel(name: string): Promise<{ id: string; name: string } | null> {
   try {
-    const data = await slackPost<SlackResponse & { channel?: { id?: string; name?: string } }>(
-      'conversations.create',
-      { name, is_private: true }
+    const result = await slackCall<{ ok?: unknown; channel?: { id?: string; name?: string } }>(() =>
+      conversationsApi.conversationsCreate(config.slack.botToken, name, true)
     );
-    const ch = data.channel;
-    if (ch?.id && ch.name) return { id: ch.id, name: ch.name };
+    if (result?.ok && result.channel?.id && result.channel?.name) {
+      return { id: result.channel.id, name: result.channel.name };
+    }
     return null;
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('name_taken')) return null;
-    throw err;
+  } catch (error) {
+    if (error instanceof ConversationsCreateErrorSchemaError) {
+      const body = error.result as { error?: string } | undefined;
+      if (body?.error === 'name_taken') return null;
+    }
+    throw error;
   }
 }
 
 async function inviteUsers(channelId: string, userIds: string[]): Promise<void> {
   if (userIds.length === 0) return;
   try {
-    await slackPost('conversations.invite', {
-      channel: channelId,
-      users: userIds.join(','),
-    });
-  } catch (err) {
-    if (err instanceof Error && err.message.includes('already_in_channel')) return;
-    console.error(`[slack] invite failed for channel ${channelId}:`, err instanceof Error ? err.message : err);
+    await slackCall(() =>
+      conversationsApi.conversationsInvite(config.slack.botToken, channelId, userIds.join(','))
+    );
+  } catch (error) {
+    if (error instanceof ConversationsInviteErrorSchema1Error) {
+      const body = error.result as { error?: string } | undefined;
+      if (body?.error === 'already_in_channel') return;
+    }
+    if (error instanceof ApiError) {
+      console.error(`[slack] invite failed for channel ${channelId}:`, error.statusCode, error.body);
+      return;
+    }
+    throw error;
   }
 }
 
@@ -199,13 +218,32 @@ export interface PostMessageOpts {
 export async function postMessage(opts: PostMessageOpts): Promise<void> {
   const { channelId, text, blocks } = opts;
   try {
-    await slackPost('chat.postMessage', {
-      channel: channelId,
-      text,
-      ...(blocks ? { blocks } : {}),
-    });
-  } catch (err) {
-    console.error('[slack] postMessage failed:', err instanceof Error ? err.message : err);
+    await slackCall(() =>
+      chatApi.chatPostMessage(
+        config.slack.botToken,
+        channelId,
+        undefined,              // asUser
+        undefined,              // attachments
+        blocks ? JSON.stringify(blocks) : undefined, // blocks
+        undefined,              // iconEmoji
+        undefined,              // iconUrl
+        undefined,              // linkNames
+        undefined,              // mrkdwn
+        undefined,              // parse
+        undefined,              // replyBroadcast
+        text                    // text
+      )
+    );
+  } catch (error) {
+    if (error instanceof ChatPostMessageErrorSchemaError) {
+      console.error('[slack] postMessage failed:', error.result);
+      return;
+    }
+    if (error instanceof ApiError) {
+      console.error('[slack] postMessage failed:', error.statusCode, error.body);
+      return;
+    }
+    throw error;
   }
 }
 
