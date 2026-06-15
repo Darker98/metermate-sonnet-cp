@@ -3,6 +3,7 @@ import {
   ComponentsController,
   SubscriptionsController,
   SubscriptionComponentsController,
+  SubscriptionProductsController,
   ApiError,
   CollectionMethod as MaxioCollectionMethod,
   ErrorListResponseError,
@@ -10,6 +11,8 @@ import {
 import type {
   CreateSubscriptionRequest,
   CreateUsageRequest,
+  SubscriptionMigrationPreviewRequest,
+  SubscriptionProductMigrationRequest,
 } from '@maxio-com/advanced-billing-sdk';
 import { maxioClient } from '../maxioClient.js';
 import { config } from '../config.js';
@@ -19,6 +22,7 @@ export const productFamiliesCtrl = new ProductFamiliesController(maxioClient);
 export const componentsCtrl = new ComponentsController(maxioClient);
 export const subscriptionsCtrl = new SubscriptionsController(maxioClient);
 export const subscriptionComponentsCtrl = new SubscriptionComponentsController(maxioClient);
+export const subscriptionProductsCtrl = new SubscriptionProductsController(maxioClient);
 
 export const productCache = new Map<string, ProductInfo>();
 export const componentCache = new Map<string, ComponentInfo>();
@@ -201,6 +205,134 @@ export async function reportUsage(params: ReportUsageParams): Promise<UsageResul
     }
     if (err instanceof ApiError) {
       throw new Error(`[maxio] createUsage failed (HTTP ${err.statusCode}): ${String(err.body)}`);
+    }
+    throw err;
+  }
+}
+
+export interface SubscriptionInfo {
+  id: number;
+  state: string;
+  productId: number;
+  productHandle: string;
+  productName: string;
+}
+
+export async function readSubscription(subscriptionId: number): Promise<SubscriptionInfo> {
+  const response = await subscriptionsCtrl.readSubscription(subscriptionId);
+  const sub = response.result?.subscription;
+  if (!sub?.id || !sub.state || !sub.product?.id) {
+    throw new Error('[maxio] readSubscription returned incomplete data');
+  }
+  return {
+    id: Number(sub.id),
+    state: String(sub.state),
+    productId: sub.product.id,
+    productHandle: sub.product.handle ?? '',
+    productName: sub.product.name ?? '',
+  };
+}
+
+export interface PlanChangePreviewResult {
+  proratedAdjustmentInCents: number;
+  chargeInCents: number;
+  paymentDueInCents: number;
+  creditAppliedInCents: number;
+}
+
+export async function previewPlanChange(
+  subscriptionId: number,
+  newProductHandle: string
+): Promise<PlanChangePreviewResult> {
+  const body: SubscriptionMigrationPreviewRequest = {
+    migration: {
+      productHandle: newProductHandle,
+      includeTrial: false,
+      includeInitialCharge: false,
+      includeCoupons: true,
+      preservePeriod: true,
+    },
+  };
+
+  try {
+    const response = await subscriptionProductsCtrl.previewSubscriptionProductMigration(
+      subscriptionId,
+      body
+    );
+
+    const preview = response.result?.migration;
+    if (!preview) {
+      throw new Error('[maxio] previewSubscriptionProductMigration returned no migration data');
+    }
+
+    return {
+      proratedAdjustmentInCents: Number(preview.proratedAdjustmentInCents ?? 0),
+      chargeInCents: Number(preview.chargeInCents ?? 0),
+      paymentDueInCents: Number(preview.paymentDueInCents ?? 0),
+      creditAppliedInCents: Number(preview.creditAppliedInCents ?? 0),
+    };
+  } catch (err) {
+    if (err instanceof ErrorListResponseError) {
+      const messages = (err.result as { errors?: string[] } | undefined)?.errors ?? [];
+      throw new Error(`[maxio] Plan change preview failed: ${messages.join('; ')}`);
+    }
+    if (err instanceof ApiError) {
+      throw new Error(`[maxio] previewPlanChange failed (HTTP ${err.statusCode}): ${String(err.body)}`);
+    }
+    throw err;
+  }
+}
+
+export interface ExecutePlanChangeParams {
+  subscriptionId: number;
+  newProductId: number;
+  timing: 'prorate' | 'at-renewal';
+}
+
+export interface ExecutePlanChangeResult {
+  subscriptionId: number;
+  state: string;
+  newProductName: string;
+  newProductId: number;
+}
+
+export async function executePlanChange(
+  params: ExecutePlanChangeParams
+): Promise<ExecutePlanChangeResult> {
+  const body: SubscriptionProductMigrationRequest = {
+    migration: {
+      productId: params.newProductId,
+      includeTrial: false,
+      includeInitialCharge: false,
+      includeCoupons: true,
+      preservePeriod: params.timing === 'prorate',
+    },
+  };
+
+  try {
+    const response = await subscriptionProductsCtrl.migrateSubscriptionProduct(
+      params.subscriptionId,
+      body
+    );
+
+    const sub = response.result?.subscription;
+    if (!sub?.id || !sub.state) {
+      throw new Error('[maxio] migrateSubscriptionProduct returned incomplete subscription data');
+    }
+
+    return {
+      subscriptionId: Number(sub.id),
+      state: String(sub.state),
+      newProductName: sub.product?.name ?? '',
+      newProductId: sub.product?.id ?? params.newProductId,
+    };
+  } catch (err) {
+    if (err instanceof ErrorListResponseError) {
+      const messages = (err.result as { errors?: string[] } | undefined)?.errors ?? [];
+      throw new Error(`[maxio] Plan change failed: ${messages.join('; ')}`);
+    }
+    if (err instanceof ApiError) {
+      throw new Error(`[maxio] executePlanChange failed (HTTP ${err.statusCode}): ${String(err.body)}`);
     }
     throw err;
   }

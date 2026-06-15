@@ -230,6 +230,53 @@ export interface UsageMessageOpts {
   usageId: number;
 }
 
+export interface PlanChangeMessageOpts {
+  channelId: string;
+  fromPlanName: string;
+  toPlanName: string;
+  timing: string;
+  proratedAdjustmentInCents: number;
+  paymentDueInCents: number;
+  subscriptionState: string;
+  txnId: string;
+}
+
+export async function postPlanChangeMessage(opts: PlanChangeMessageOpts): Promise<void> {
+  const fmt = (cents: number) => `$${(Math.abs(cents) / 100).toFixed(2)}`;
+  const adjDisplay =
+    opts.proratedAdjustmentInCents === 0
+      ? '$0.00'
+      : `${opts.proratedAdjustmentInCents < 0 ? '-' : '+'}${fmt(opts.proratedAdjustmentInCents)}`;
+
+  const blocks = [
+    {
+      type: 'header',
+      text: { type: 'plain_text', text: 'Plan Changed' },
+    },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*From:*\n${opts.fromPlanName}` },
+        { type: 'mrkdwn', text: `*To:*\n${opts.toPlanName}` },
+        { type: 'mrkdwn', text: `*Timing:*\n${opts.timing}` },
+        { type: 'mrkdwn', text: `*Prorated adjustment:*\n${adjDisplay}` },
+        { type: 'mrkdwn', text: `*Payment due:*\n${fmt(opts.paymentDueInCents)}` },
+        { type: 'mrkdwn', text: `*Subscription state:*\n${opts.subscriptionState}` },
+      ],
+    },
+    {
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `Transaction: \`${opts.txnId}\`` }],
+    },
+  ];
+
+  await postMessage({
+    channelId: opts.channelId,
+    text: `Plan changed from ${opts.fromPlanName} to ${opts.toPlanName} (${opts.timing})`,
+    blocks,
+  });
+}
+
 export async function postUsageMessage(opts: UsageMessageOpts): Promise<void> {
   const blocks = [
     {
