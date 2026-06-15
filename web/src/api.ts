@@ -65,3 +65,13 @@ export interface MutatingResponse {
   channelName?: string;
   [key: string]: unknown;
 }
+
+export interface BookResult extends MutatingResponse {
+  subscriptionId: number;
+  subscriptionState: string;
+  planHandle: string;
+  consultantId: string;
+  consultantInvited: boolean;
+  clientInvited: boolean;
+  clientNotifiedByEmail: boolean;
+}

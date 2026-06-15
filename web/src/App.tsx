@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiGet, type HealthResponse } from './api.js';
+import BookForm from './components/client/BookForm.js';
 
 type Role = 'client' | 'admin';
 
@@ -72,14 +73,7 @@ export default function App() {
 }
 
 function ClientShell() {
-  return (
-    <div className="card">
-      <h2>Client Portal</h2>
-      <p style={{ color: '#64748b', fontSize: 14 }}>
-        Use case forms will appear here as they are implemented.
-      </p>
-    </div>
-  );
+  return <BookForm />;
 }
 
 interface AdminLoginProps {
