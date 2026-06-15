@@ -112,3 +112,21 @@ export interface BookResult extends MutatingResponse {
   clientInvited: boolean;
   clientNotifiedByEmail: boolean;
 }
+
+export interface LifecycleResult extends MutatingResponse {
+  subscriptionId: number;
+  subscriptionState: string;
+  action: string;
+  cancelTiming?: string;
+}
+
+export interface InvoiceResult extends MutatingResponse {
+  subscriptionId: number;
+  invoiceUid: string;
+  invoiceNumber: string;
+  dueAmount: string;
+  totalAmount: string;
+  dueDate: string;
+  issueDate: string;
+  invoiceStatus: string;
+}

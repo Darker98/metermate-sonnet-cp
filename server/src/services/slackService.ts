@@ -314,6 +314,47 @@ export interface LifecycleMessageOpts {
   txnId: string;
 }
 
+export interface InvoiceMessageOpts {
+  channelId: string;
+  invoiceNumber: string;
+  dueAmount: string;
+  totalAmount: string;
+  dueDate: string;
+  invoiceStatus: string;
+  subscriptionId: number;
+  txnId: string;
+}
+
+export async function postInvoiceMessage(opts: InvoiceMessageOpts): Promise<void> {
+  const blocks = [
+    {
+      type: 'header',
+      text: { type: 'plain_text', text: 'Invoice Issued & Sent' },
+    },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*Invoice #:*\n${opts.invoiceNumber}` },
+        { type: 'mrkdwn', text: `*Total:*\n$${opts.totalAmount}` },
+        { type: 'mrkdwn', text: `*Amount due:*\n$${opts.dueAmount}` },
+        { type: 'mrkdwn', text: `*Due date:*\n${opts.dueDate}` },
+        { type: 'mrkdwn', text: `*Status:*\n${opts.invoiceStatus}` },
+        { type: 'mrkdwn', text: `*Subscription ID:*\n${opts.subscriptionId}` },
+      ],
+    },
+    {
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `Transaction: \`${opts.txnId}\`` }],
+    },
+  ];
+
+  await postMessage({
+    channelId: opts.channelId,
+    text: `Invoice ${opts.invoiceNumber} issued — $${opts.dueAmount} due on ${opts.dueDate}`,
+    blocks,
+  });
+}
+
 const ACTION_PAST: Record<string, string> = {
   pause: 'Paused',
   resume: 'Resumed',

@@ -180,6 +180,15 @@ body {
   background: #cbd5e1;
 }
 
+.btn-danger {
+  background: #ef4444;
+  color: #fff;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #dc2626;
+}
+
 .btn-full { width: 100%; }
 
 /* ─── Result / Alert boxes ───────────────────────────────────────────────── */

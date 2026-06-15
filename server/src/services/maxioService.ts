@@ -5,9 +5,11 @@ import {
   SubscriptionComponentsController,
   SubscriptionProductsController,
   SubscriptionStatusController,
+  InvoicesController,
   ApiError,
   CollectionMethod as MaxioCollectionMethod,
   ErrorListResponseError,
+  ErrorArrayMapResponseError,
 } from '@maxio-com/advanced-billing-sdk';
 import type {
   CreateSubscriptionRequest,
@@ -17,6 +19,8 @@ import type {
   CancellationRequest,
   ReactivateSubscriptionRequest,
   PauseRequest,
+  CreateInvoiceRequest,
+  SendInvoiceRequest,
 } from '@maxio-com/advanced-billing-sdk';
 import { maxioClient } from '../maxioClient.js';
 import { config } from '../config.js';
@@ -28,6 +32,7 @@ export const subscriptionsCtrl = new SubscriptionsController(maxioClient);
 export const subscriptionComponentsCtrl = new SubscriptionComponentsController(maxioClient);
 export const subscriptionProductsCtrl = new SubscriptionProductsController(maxioClient);
 export const subscriptionStatusCtrl = new SubscriptionStatusController(maxioClient);
+export const invoicesCtrl = new InvoicesController(maxioClient);
 
 export const productCache = new Map<string, ProductInfo>();
 export const componentCache = new Map<string, ComponentInfo>();
@@ -410,6 +415,83 @@ export async function executePlanChange(
     }
     if (err instanceof ApiError) {
       throw new Error(`[maxio] executePlanChange failed (HTTP ${err.statusCode}): ${String(err.body)}`);
+    }
+    throw err;
+  }
+}
+
+export interface InvoiceLineItem {
+  title: string;
+  quantity: number;
+  unitPrice: string;
+}
+
+export interface IssueInvoiceParams {
+  subscriptionId: number;
+  clientEmail: string;
+  lineItems: InvoiceLineItem[];
+}
+
+export interface IssueInvoiceResult {
+  invoiceUid: string;
+  invoiceNumber: string;
+  dueAmount: string;
+  totalAmount: string;
+  dueDate: string;
+  issueDate: string;
+  invoiceStatus: string;
+}
+
+export async function issueAndSendInvoice(params: IssueInvoiceParams): Promise<IssueInvoiceResult> {
+  try {
+    const createBody: CreateInvoiceRequest = {
+      invoice: {
+        lineItems: params.lineItems.map((item) => ({
+          title: item.title,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        })),
+      },
+    };
+
+    // createInvoice immediately creates an open ad-hoc invoice — no issueInvoice needed
+    // (issueInvoice is only for pending invoices from Maxio's billing cycle)
+    const createResponse = await invoicesCtrl.createInvoice(params.subscriptionId, createBody);
+    const invoiceUid = createResponse.result?.invoice?.uid;
+    if (!invoiceUid) {
+      throw new Error('[maxio] createInvoice returned no invoice UID');
+    }
+
+    const sendBody: SendInvoiceRequest = {
+      recipientEmails: [params.clientEmail],
+    };
+    await invoicesCtrl.sendInvoice(invoiceUid, sendBody);
+
+    const readResponse = await invoicesCtrl.readInvoice(invoiceUid);
+    const inv = readResponse.result;
+    if (!inv) {
+      throw new Error('[maxio] readInvoice returned no invoice');
+    }
+
+    return {
+      invoiceUid,
+      invoiceNumber: inv.number ?? '',
+      dueAmount: inv.dueAmount ?? '0.00',
+      totalAmount: inv.totalAmount ?? '0.00',
+      dueDate: inv.dueDate ?? '',
+      issueDate: inv.issueDate ?? '',
+      invoiceStatus: String(inv.status ?? 'open'),
+    };
+  } catch (err) {
+    if (err instanceof ErrorArrayMapResponseError) {
+      throw new Error(`[maxio] Invoice operation failed: ${JSON.stringify(err.result)}`);
+    }
+    if (err instanceof ErrorListResponseError) {
+      const messages = (err.result as { errors?: string[] } | undefined)?.errors ?? [];
+      throw new Error(`[maxio] Invoice operation failed: ${messages.join('; ')}`);
+    }
+    if (err instanceof ApiError) {
+      throw new Error(`[maxio] Invoice operation failed (HTTP ${err.statusCode}): ${String(err.body)}`);
     }
     throw err;
   }
