@@ -424,3 +424,67 @@ export async function postBookingMessage(opts: BookingMessageOpts): Promise<void
     blocks,
   });
 }
+
+import type { BillingDigestData } from './maxioService.js';
+
+export interface DigestMessageOpts {
+  data: BillingDigestData;
+  txnId: string;
+  generatedAt: string;
+}
+
+export async function postDigestMessage(opts: DigestMessageOpts): Promise<void> {
+  const { data, txnId, generatedAt } = opts;
+  const { subscriptions: s, invoices: inv } = data;
+
+  const recentInvoiceLines =
+    inv.recent.length === 0
+      ? '_No recent invoices_'
+      : inv.recent
+          .map((r) => `• *${r.number || '—'}* — $${r.totalAmount} — ${r.status} — ${r.customerEmail}`)
+          .join('\n');
+
+  const blocks = [
+    {
+      type: 'header',
+      text: { type: 'plain_text', text: '📊 Billing Activity Digest' },
+    },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*Total subscriptions:*\n${s.total}` },
+        { type: 'mrkdwn', text: `*Active:*\n${s.active}` },
+        { type: 'mrkdwn', text: `*On hold:*\n${s.onHold}` },
+        { type: 'mrkdwn', text: `*Canceled:*\n${s.canceled}` },
+        { type: 'mrkdwn', text: `*Other:*\n${s.other}` },
+      ],
+    },
+    { type: 'divider' },
+    {
+      type: 'section',
+      fields: [
+        { type: 'mrkdwn', text: `*Total invoices (last 50):*\n${inv.total}` },
+        { type: 'mrkdwn', text: `*Open:*\n${inv.open}` },
+        { type: 'mrkdwn', text: `*Paid:*\n${inv.paid}` },
+        { type: 'mrkdwn', text: `*Total billed:*\n$${inv.totalAmountSum}` },
+      ],
+    },
+    { type: 'divider' },
+    {
+      type: 'section',
+      text: { type: 'mrkdwn', text: `*Most recent invoices:*\n${recentInvoiceLines}` },
+    },
+    {
+      type: 'context',
+      elements: [
+        { type: 'mrkdwn', text: `Generated ${generatedAt} · Transaction: \`${txnId}\`` },
+      ],
+    },
+  ];
+
+  await postMessage({
+    channelId: config.slack.digestChannel,
+    text: `Billing digest — ${s.total} subscriptions, ${inv.total} invoices, $${inv.totalAmountSum} billed`,
+    blocks,
+  });
+}

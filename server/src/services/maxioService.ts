@@ -10,6 +10,7 @@ import {
   CollectionMethod as MaxioCollectionMethod,
   ErrorListResponseError,
   ErrorArrayMapResponseError,
+  Direction,
 } from '@maxio-com/advanced-billing-sdk';
 import type {
   CreateSubscriptionRequest,
@@ -495,4 +496,85 @@ export async function issueAndSendInvoice(params: IssueInvoiceParams): Promise<I
     }
     throw err;
   }
+}
+
+export interface DigestSubscriptionStats {
+  total: number;
+  active: number;
+  onHold: number;
+  canceled: number;
+  other: number;
+}
+
+export interface DigestInvoiceSummary {
+  number: string;
+  status: string;
+  totalAmount: string;
+  customerEmail: string;
+  dueDate: string;
+}
+
+export interface DigestInvoiceStats {
+  total: number;
+  open: number;
+  paid: number;
+  totalAmountSum: string;
+  recent: DigestInvoiceSummary[];
+}
+
+export interface BillingDigestData {
+  subscriptions: DigestSubscriptionStats;
+  invoices: DigestInvoiceStats;
+}
+
+export async function fetchBillingDigest(): Promise<BillingDigestData> {
+  const [subResponse, invResponse] = await Promise.all([
+    subscriptionsCtrl.listSubscriptions({ page: 1, perPage: 200 }),
+    invoicesCtrl.listInvoices({ page: 1, perPage: 50, direction: Direction.Desc }),
+  ]);
+
+  // — subscriptions —
+  const subStats: DigestSubscriptionStats = { total: 0, active: 0, onHold: 0, canceled: 0, other: 0 };
+  for (const wrapper of subResponse.result ?? []) {
+    const state = String(wrapper.subscription?.state ?? '');
+    subStats.total++;
+    if (state === 'active') subStats.active++;
+    else if (state === 'canceled') subStats.canceled++;
+    else if (state === 'on_hold') subStats.onHold++;
+    else subStats.other++;
+  }
+
+  // — invoices —
+  const rawInvoices = invResponse.result?.invoices ?? [];
+  let totalAmountSum = 0;
+  let openCount = 0;
+  let paidCount = 0;
+  const recent: DigestInvoiceSummary[] = [];
+
+  for (const inv of rawInvoices) {
+    if (!inv) continue;
+    const status = String(inv.status ?? '');
+    if (status === 'open') openCount++;
+    else if (status === 'paid') paidCount++;
+    totalAmountSum += parseFloat(inv.totalAmount ?? '0') || 0;
+    if (recent.length < 5) {
+      recent.push({
+        number: inv.number ?? '',
+        status,
+        totalAmount: inv.totalAmount ?? '0.00',
+        customerEmail: inv.customer?.email ?? '',
+        dueDate: inv.dueDate ?? '',
+      });
+    }
+  }
+
+  const invStats: DigestInvoiceStats = {
+    total: rawInvoices.length,
+    open: openCount,
+    paid: paidCount,
+    totalAmountSum: totalAmountSum.toFixed(2),
+    recent,
+  };
+
+  return { subscriptions: subStats, invoices: invStats };
 }

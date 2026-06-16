@@ -7,6 +7,7 @@ import { usageRouter } from './routes/usage.js';
 import { planChangeRouter } from './routes/planChange.js';
 import { lifecycleRouter } from './routes/lifecycle.js';
 import { invoicesRouter } from './routes/invoices.js';
+import { digestRouter } from './routes/digest.js';
 import { sessionStore } from './stores/sessionStore.js';
 import { loadProductCache, loadComponentCache, productCache } from './services/maxioService.js';
 
@@ -21,6 +22,7 @@ app.use('/api', usageRouter);
 app.use('/api', planChangeRouter);
 app.use('/api', lifecycleRouter);
 app.use('/api', invoicesRouter);
+app.use('/api', digestRouter);
 
 async function bootstrap(): Promise<void> {
   await Promise.all([loadProductCache(), loadComponentCache()]);
