@@ -130,3 +130,17 @@ export interface InvoiceResult extends MutatingResponse {
   issueDate: string;
   invoiceStatus: string;
 }
+
+export interface DigestResult extends MutatingResponse {
+  digestChannelId: string;
+  totalSubscriptions: number;
+  activeSubscriptions: number;
+  onHoldSubscriptions: number;
+  canceledSubscriptions: number;
+  totalInvoices: number;
+  openInvoices: number;
+  paidInvoices: number;
+  totalAmountSum: string;
+  generatedAt: string;
+  note?: string;
+}

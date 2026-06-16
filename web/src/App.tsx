@@ -5,6 +5,7 @@ import UsageForm from './components/client/UsageForm.js';
 import PlanChangeForm from './components/client/PlanChangeForm.js';
 import LifecycleForm from './components/client/LifecycleForm.js';
 import InvoiceForm from './components/admin/InvoiceForm.js';
+import DigestForm from './components/admin/DigestForm.js';
 
 type Role = 'client' | 'admin';
 
@@ -144,7 +145,7 @@ function AdminLogin({ onLogin }: AdminLoginProps) {
   );
 }
 
-const ADMIN_TABS = ['Issue Invoice'] as const;
+const ADMIN_TABS = ['Issue Invoice', 'Billing Digest'] as const;
 type AdminTab = (typeof ADMIN_TABS)[number];
 
 interface AdminShellProps {
@@ -178,6 +179,7 @@ function AdminShell({ creds, onLogout }: AdminShellProps) {
         </button>
       </div>
       {tab === 'Issue Invoice' && <InvoiceForm creds={creds} />}
+      {tab === 'Billing Digest' && <DigestForm creds={creds} />}
     </div>
   );
 }
